@@ -1,11 +1,16 @@
 import os, io, json, re
 from typing import Dict
 from dotenv import load_dotenv
-from fastapi import FastAPI, UploadFile, Form, File
+from fastapi import FastAPI, UploadFile, Form, File, Body
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from fastapi.responses import HTMLResponse
+from pydantic import BaseModel, Field
 from pypdf import PdfReader
 from openai import OpenAI
+
+class TextPayload(BaseModel):
+    title: str = Field(default="untitled")
+    text: str = Field(min_length=1, description="Essay text to score")
 
 # ---------- env ----------
 load_dotenv()
@@ -120,3 +125,82 @@ async def score(file: UploadFile = File(...), title: str = Form("untitled")):
         "tokens_estimate": len(text.split()),
         "model_version": MODEL_NAME
     }
+
+@app.post("/score-text")
+def score_text(payload: TextPayload = Body(...)):
+    text = redact_basic_pii(payload.text)
+    scores = score_text_llm(text)
+    return {
+        "title": payload.title,
+        "scores": scores,
+        "tokens_estimate": len(text.split()),
+        "model_version": MODEL_NAME
+    }
+
+@app.get("/", response_class=HTMLResponse)
+def index():
+    return """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>AI Portfolio MVP — Text Scorer</title>
+  <style>
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial,sans-serif;margin:24px;max-width:900px}
+    h1{margin:0 0 12px}
+    .row{display:flex;gap:12px;align-items:center;margin:8px 0}
+    textarea{width:100%;min-height:260px;padding:12px;font-size:16px}
+    input[type=text]{width:320px;padding:8px}
+    button{padding:10px 14px;cursor:pointer}
+    pre{background:#f6f8fa;padding:12px;border-radius:8px;overflow:auto}
+    .muted{color:#666;font-size:12px}
+  </style>
+</head>
+<body>
+  <h1>Text Scorer</h1>
+  <div class="row">
+    <label for="title">Title:</label>
+    <input id="title" type="text" placeholder="untitled" />
+    <button id="sample">Insert sample</button>
+  </div>
+  <textarea id="essay" placeholder="Paste or type your essay here..."></textarea>
+  <div class="row">
+    <button id="scoreBtn">Score Essay</button>
+    <span class="muted">Sends your text to <code>/score-text</code> and shows JSON below.</span>
+  </div>
+  <h2>Result</h2>
+  <pre id="out">{}</pre>
+
+<script>
+const $ = (id) => document.getElementById(id);
+
+$("sample").onclick = () => {
+  $("essay").value =
+`Climate change represents one of the most pressing challenges of our century... 
+Take Germany’s Energiewende as a case study... 
+Ultimately, the evidence compels us to support a swift transition to renewables.`;
+};
+
+$("scoreBtn").onclick = async () => {
+  const title = $("title").value || "untitled";
+  const text  = $("essay").value.trim();
+  if (!text) { $("out").textContent = "Please enter some text."; return; }
+
+  $("out").textContent = "Scoring...";
+  try {
+    const res = await fetch("/score-text", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({ title, text })
+    });
+    const json = await res.json();
+    $("out").textContent = JSON.stringify(json, null, 2);
+  } catch (err) {
+    $("out").textContent = "Error: " + (err?.message || err);
+  }
+};
+</script>
+</body>
+</html>
+"""
