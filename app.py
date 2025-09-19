@@ -1,5 +1,5 @@
 import os, io, json, re
-from typing import Dict
+from typing import Dict, List
 from dotenv import load_dotenv
 from fastapi import FastAPI, UploadFile, Form, File, Body
 from fastapi.middleware.cors import CORSMiddleware
@@ -11,6 +11,16 @@ from openai import OpenAI
 class TextPayload(BaseModel):
     title: str = Field(default="untitled")
     text: str = Field(min_length=1, description="Essay text to score")
+
+class Category(BaseModel):
+    name: str = Field(min_length=2, max_length=40, description="JSON key to return (e.g., 'argumentation' or 'intellectual_curiosity')")
+    description: str = Field(default="", max_length=200, description="What this category means")
+
+class FlexPayload(BaseModel):
+    title: str = "untitled"
+    text: str = Field(min_length=1)
+    categories: List[Category] = Field(min_items=1)
+    quotes: bool = False  # set true if you want a short evidence quote per category
 
 # ---------- env ----------
 load_dotenv()
@@ -143,56 +153,85 @@ def index():
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>AI Portfolio MVP — Text Scorer</title>
-  <style>
-    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial,sans-serif;margin:24px;max-width:900px}
-    h1{margin:0 0 12px}
-    .row{display:flex;gap:12px;align-items:center;margin:8px 0}
-    textarea{width:100%;min-height:260px;padding:12px;font-size:16px}
-    input[type=text]{width:320px;padding:8px}
-    button{padding:10px 14px;cursor:pointer}
-    pre{background:#f6f8fa;padding:12px;border-radius:8px;overflow:auto}
-    .muted{color:#666;font-size:12px}
-  </style>
+<meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Text Scorer (Flexible Rubric)</title>
+<style>
+body{font-family:system-ui,Segoe UI,Roboto,Inter,Arial,sans-serif;margin:24px;max-width:960px}
+h1{margin:0 0 12px}
+label{font-weight:600}
+textarea,input,button{font-size:16px}
+textarea{width:100%;min-height:220px;padding:10px;margin:6px 0 14px}
+.row{display:flex;gap:12px;align-items:center;margin:8px 0;flex-wrap:wrap}
+input[type=text]{padding:8px;width:320px}
+button{padding:10px 14px;cursor:pointer}
+pre{background:#f6f8fa;padding:12px;border-radius:8px;overflow:auto}
+.small{font-size:12px;color:#666}
+</style>
 </head>
 <body>
-  <h1>Text Scorer</h1>
-  <div class="row">
-    <label for="title">Title:</label>
-    <input id="title" type="text" placeholder="untitled" />
-    <button id="sample">Insert sample</button>
-  </div>
-  <textarea id="essay" placeholder="Paste or type your essay here..."></textarea>
-  <div class="row">
-    <button id="scoreBtn">Score Essay</button>
-    <span class="muted">Sends your text to <code>/score-text</code> and shows JSON below.</span>
-  </div>
-  <h2>Result</h2>
-  <pre id="out">{}</pre>
+<h1>Text Scorer — Flexible Categories</h1>
+
+<div class="row">
+  <label for="title">Title</label>
+  <input id="title" type="text" placeholder="untitled" />
+  <label><input id="quotes" type="checkbox"/> include evidence quotes</label>
+</div>
+
+<label for="cats">Categories (one per line, format: <code>name: description</code>)</label>
+<textarea id="cats">argumentation: Clear claim and support with evidence
+writing: Clarity, organization, grammar, style
+creativity: Originality, novel insight, unique voice</textarea>
+
+<label for="essay">Essay text</label>
+<textarea id="essay" placeholder="Paste or type your essay here..."></textarea>
+
+<div class="row">
+  <button id="sample">Insert sample</button>
+  <button id="scoreBtn">Score with current categories</button>
+  <span class="small">Sends JSON to <code>/score-text-flex</code> and shows the result.</span>
+</div>
+
+<h2>Result</h2>
+<pre id="out">{}</pre>
 
 <script>
 const $ = (id) => document.getElementById(id);
 
 $("sample").onclick = () => {
+  $("title").value = "The Role of Failure in Innovation";
   $("essay").value =
-`Climate change represents one of the most pressing challenges of our century... 
-Take Germany’s Energiewende as a case study... 
-Ultimately, the evidence compels us to support a swift transition to renewables.`;
+`Innovation is often celebrated as the product of genius, but history shows it grows out of failure...
+A culture that encourages learning from mistakes enables innovators to persist until the right solution emerges.`;
 };
+
+function parseCategories(text) {
+  const lines = text.split(/\\r?\\n/).map(l => l.trim()).filter(Boolean);
+  const cats = [];
+  for (const line of lines) {
+    const [nameRaw, ...rest] = line.split(":");
+    const name = (nameRaw || "").trim().replace(/\\s+/g, "_").toLowerCase();
+    const description = (rest.join(":") || "").trim();
+    if (!name) continue;
+    cats.push({ name, description });
+  }
+  return cats;
+}
 
 $("scoreBtn").onclick = async () => {
   const title = $("title").value || "untitled";
   const text  = $("essay").value.trim();
-  if (!text) { $("out").textContent = "Please enter some text."; return; }
+  const quotes = $("quotes").checked;
+  const cats = parseCategories($("cats").value);
+
+  if (!text) { $("out").textContent = "Please enter essay text."; return; }
+  if (!cats.length) { $("out").textContent = "Please define at least one category."; return; }
 
   $("out").textContent = "Scoring...";
   try {
-    const res = await fetch("/score-text", {
+    const res = await fetch("/score-text-flex", {
       method: "POST",
       headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({ title, text })
+      body: JSON.stringify({ title, text, categories: cats, quotes })
     });
     const json = await res.json();
     $("out").textContent = JSON.stringify(json, null, 2);
@@ -204,3 +243,68 @@ $("scoreBtn").onclick = async () => {
 </body>
 </html>
 """
+
+@app.post("/score-text-flex")
+def score_text_flex(payload: FlexPayload = Body(...)):
+    # Build a dynamic rubric from the categories the browser sends
+    base_scale = "Use 0–3 where 0=insufficient, 1=emerging, 2=proficient, 3=advanced."
+    cat_lines = "\n".join([f"- {c.name}: {c.description or 'Assess per the scale; stay on-topic.'}"
+                           for c in payload.categories])
+
+    sys = "You are an assistant that scores student work. Always output JSON only."
+    wants_quotes = payload.quotes
+    json_shape = "{ " + ", ".join(
+        [f"\"{c.name}\": {{\"score\":0-3{', \"quote\":\"≤25 words\"' if wants_quotes else ''}}}" for c in payload.categories]
+    ) + " }"
+
+    user = f"""Text:
+\"\"\"{redact_basic_pii(payload.text)[:6000]}\"\"\"
+
+RUBRIC:
+{base_scale}
+Score these categories:
+{cat_lines}
+
+Task:
+Return JSON exactly with these keys and this shape:
+{json_shape}
+No extra fields or prose."""
+
+    resp = client.chat.completions.create(
+        model=MODEL_NAME, temperature=0,
+        messages=[{"role":"system","content":sys},{"role":"user","content":user}]
+    )
+    raw = resp.choices[0].message.content.strip()
+
+    # Basic repair if the model adds stray text
+    import json
+    try:
+        data = json.loads(raw)
+    except Exception:
+        fixer = client.chat.completions.create(
+            model=MODEL_NAME, temperature=0,
+            messages=[
+                {"role":"system","content":"Fix to valid JSON only. Keep the same keys and structure."},
+                {"role":"user","content":raw}
+            ]
+        )
+        data = json.loads(fixer.choices[0].message.content)
+
+    # Minimal validation: ensure all categories exist with score 0..3 (and quote if requested)
+    for c in payload.categories:
+        if c.name not in data or not isinstance(data[c.name], dict):
+            raise ValueError(f"Missing category '{c.name}' in response.")
+        s = data[c.name].get("score", None)
+        if not isinstance(s, int) or s not in (0,1,2,3):
+            raise ValueError(f"Invalid score for '{c.name}': {s}")
+        if wants_quotes:
+            q = data[c.name].get("quote", "")
+            if not isinstance(q, str) or len(q.split()) > 25:
+                raise ValueError(f"Quote too long or missing for '{c.name}'.")
+
+    return {
+        "title": payload.title,
+        "scores": data,
+        "tokens_estimate": len(payload.text.split()),
+        "model_version": MODEL_NAME
+    }
