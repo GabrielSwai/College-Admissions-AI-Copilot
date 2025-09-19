@@ -1,0 +1,33 @@
+# === Python ===
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
+.venv/
+venv/
+*.venv/
+
+# === Environment / secrets ===
+.env
+.env.*
+!.env.example    # <-- keep the example checked in, ignore real secrets
+
+# === Logs & misc ===
+*.log
+*.sqlite3
+*.db
+
+# === IDE/editor files ===
+.vscode/
+.idea/
+*.code-workspace
+
+# === macOS ===
+.DS_Store
