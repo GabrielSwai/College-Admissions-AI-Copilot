@@ -1,9 +1,10 @@
 import os, io, json, re
 from typing import Dict, List
 from dotenv import load_dotenv
-from fastapi import FastAPI, UploadFile, Form, File, Body, StaticFiles, Path
+from fastapi import FastAPI, UploadFile, Form, File, Body, Path
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from pypdf import PdfReader
 from openai import OpenAI
