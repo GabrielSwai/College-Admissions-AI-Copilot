@@ -1,7 +1,7 @@
 import os, io, json, re
 from typing import Dict, List
 from dotenv import load_dotenv
-from fastapi import FastAPI, UploadFile, Form, File, Body
+from fastapi import FastAPI, UploadFile, Form, File, Body, StaticFiles, Path
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
@@ -34,13 +34,21 @@ if not OPENAI_API_KEY:
 client = OpenAI(api_key=OPENAI_API_KEY)
 
 # ---------- fastapi ----------
-app = FastAPI(title="AI Portfolio MVP", version="0.1.0")
+app = FastAPI(title="AI Portfolio MVP", version="0.1.0", root_path="/ao-copilot")
+BASE_DIR = Path(__file__).resolve().parent
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[ALLOWED_ORIGINS] if ALLOWED_ORIGINS != "*" else ["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+)
+
+app.mount(
+    "/static",
+    StaticFiles(directory=BASE_DIR / "static", html=False),  # html=False avoids fallback to index.html
+    name="static",
 )
 
 # ---------- simple schema ----------
